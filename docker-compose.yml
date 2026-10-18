@@ -1,0 +1,178 @@
+services:
+  # ============================================================================
+  # All-In-One Service (Default)
+  # Runs all enabled gateways & log-viewer in a single resource-efficient container
+  # ============================================================================
+  openclaw-stack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openclaw-cli-gateway-stack:latest
+    container_name: openclaw-gateway-stack
+    restart: unless-stopped
+    ports:
+      - "${CLAUDE_GATEWAY_PORT:-4568}:4568"
+      - "${AGY_GATEWAY_PORT:-4569}:4569"
+      - "${AGY_SEARCH_PORT:-4570}:4570"
+      - "${MUSE_GATEWAY_PORT:-4571}:4571"
+      - "${LOG_VIEWER_PORT:-8765}:8765"
+    environment:
+      - OPENCLAW_WORKSPACE=/workspace
+      - LOG_DIR=/logs
+      - CLAUDE_CLI_GATEWAY_HOST=0.0.0.0
+      - CLAUDE_CLI_GATEWAY_PORT=4568
+      - CLAUDE_CLI_GATEWAY_MAX_CONCURRENT=${CLAUDE_CLI_GATEWAY_MAX_CONCURRENT:-6}
+      - CLAUDE_CLI_GATEWAY_TIMEOUT_SECONDS=${CLAUDE_CLI_GATEWAY_TIMEOUT_SECONDS:-3900}
+      - CLAUDE_CLI_GATEWAY_STALL_SECONDS=${CLAUDE_CLI_GATEWAY_STALL_SECONDS:-1200}
+      - CLAUDE_CLI_GATEWAY_API_KEY=${CLAUDE_CLI_GATEWAY_API_KEY:-}
+
+      - AGY_CLI_GATEWAY_HOST=0.0.0.0
+      - AGY_CLI_GATEWAY_PORT=4569
+      - AGY_CLI_GATEWAY_MAX_CONCURRENT=${AGY_CLI_GATEWAY_MAX_CONCURRENT:-6}
+      - AGY_CLI_GATEWAY_TIMEOUT_SECONDS=${AGY_CLI_GATEWAY_TIMEOUT_SECONDS:-3900}
+      - AGY_CLI_GATEWAY_API_KEY=${AGY_CLI_GATEWAY_API_KEY:-}
+      - USE_HOST_AGY=${USE_HOST_AGY:-1}
+      - AGY_BRIDGE_URL=http://host.docker.internal:${AGY_HOST_DAEMON_PORT:-45690}/exec
+
+      - AGY_SEARCH_HOST=0.0.0.0
+      - AGY_SEARCH_PORT=4570
+      - AGY_SEARCH_MAX_CONCURRENT=${AGY_SEARCH_MAX_CONCURRENT:-8}
+      - AGY_SEARCH_API_KEY=${AGY_SEARCH_API_KEY:-}
+
+      - MUSE_CLI_GATEWAY_HOST=0.0.0.0
+      - MUSE_CLI_GATEWAY_PORT=4571
+      - MUSE_CLI_GATEWAY_MAX_CONCURRENT=${MUSE_CLI_GATEWAY_MAX_CONCURRENT:-2}
+      - MUSE_CLI_GATEWAY_TIMEOUT_MS=${MUSE_CLI_GATEWAY_TIMEOUT_MS:-1800000}
+      - MUSE_CLI_GATEWAY_API_KEY=${MUSE_CLI_GATEWAY_API_KEY:-}
+
+      - LOG_VIEWER_HOST=0.0.0.0
+      - LOG_VIEWER_PORT=8765
+
+      - ENABLE_CLAUDE=${ENABLE_CLAUDE:-1}
+      - ENABLE_ANTIGRAVITY=${ENABLE_ANTIGRAVITY:-1}
+      - ENABLE_WEBSEARCH=${ENABLE_WEBSEARCH:-1}
+      - ENABLE_MUSE=${ENABLE_MUSE:-1}
+      - ENABLE_LOG_VIEWER=${ENABLE_LOG_VIEWER:-1}
+    volumes:
+      - ${HOST_WORKSPACE_PATH:-./workspace}:/workspace
+      - ${HOST_LOGS_PATH:-./logs}:/logs
+      # Mount host CLI credentials & login states
+      - ${HOST_CLAUDE_CONFIG:-~/.claude}:/root/.claude:ro
+      - ${HOST_CLAUDE_JSON:-~/.claude.json}:/root/.claude.json:ro
+      - ${HOST_GEMINI_CONFIG:-~/.gemini}:/root/.gemini:ro
+      - ${HOST_MUSE_AUTH:-~/.config/muse/auth.json}:/root/.config/muse/auth.json:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8765/ || curl -sf http://localhost:4568/health || curl -sf http://localhost:4569/health || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================================
+  # Dedicated Microservices (Optional Profile: microservices)
+  # Run services as isolated individual containers:
+  #   docker compose --profile microservices up -d
+  # ============================================================================
+  claude-gateway:
+    profiles: ["microservices"]
+    image: openclaw-cli-gateway-stack:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["claude"]
+    restart: unless-stopped
+    ports:
+      - "${CLAUDE_GATEWAY_PORT:-4568}:4568"
+    environment:
+      - CLAUDE_CLI_GATEWAY_HOST=0.0.0.0
+      - CLAUDE_CLI_GATEWAY_PORT=4568
+      - OPENCLAW_WORKSPACE=/workspace
+      - LOG_DIR=/logs
+      - CLAUDE_CLI_GATEWAY_MAX_CONCURRENT=${CLAUDE_CLI_GATEWAY_MAX_CONCURRENT:-6}
+    volumes:
+      - ${HOST_WORKSPACE_PATH:-./workspace}:/workspace
+      - ${HOST_LOGS_PATH:-./logs}:/logs
+      - ${HOST_CLAUDE_CONFIG:-~/.claude}:/root/.claude:ro
+      - ${HOST_CLAUDE_JSON:-~/.claude.json}:/root/.claude.json:ro
+
+  antigravity-gateway:
+    profiles: ["microservices"]
+    image: openclaw-cli-gateway-stack:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["antigravity"]
+    restart: unless-stopped
+    ports:
+      - "${AGY_GATEWAY_PORT:-4569}:4569"
+    environment:
+      - AGY_CLI_GATEWAY_HOST=0.0.0.0
+      - AGY_CLI_GATEWAY_PORT=4569
+      - OPENCLAW_WORKSPACE=/workspace
+      - LOG_DIR=/logs
+      - AGY_CLI_GATEWAY_MAX_CONCURRENT=${AGY_CLI_GATEWAY_MAX_CONCURRENT:-6}
+      - USE_HOST_AGY=${USE_HOST_AGY:-1}
+      - AGY_BRIDGE_URL=http://host.docker.internal:${AGY_HOST_DAEMON_PORT:-45690}/exec
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${HOST_WORKSPACE_PATH:-./workspace}:/workspace
+      - ${HOST_LOGS_PATH:-./logs}:/logs
+      - ${HOST_GEMINI_CONFIG:-~/.gemini}:/root/.gemini:ro
+
+  antigravity-websearch:
+    profiles: ["microservices"]
+    image: openclaw-cli-gateway-stack:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["websearch"]
+    restart: unless-stopped
+    ports:
+      - "${AGY_SEARCH_PORT:-4570}:4570"
+    environment:
+      - AGY_SEARCH_HOST=0.0.0.0
+      - AGY_SEARCH_PORT=4570
+      - LOG_DIR=/logs
+    volumes:
+      - ${HOST_LOGS_PATH:-./logs}:/logs
+      - ${HOST_GEMINI_CONFIG:-~/.gemini}:/root/.gemini:ro
+
+  muse-gateway:
+    profiles: ["microservices"]
+    image: openclaw-cli-gateway-stack:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["muse"]
+    restart: unless-stopped
+    ports:
+      - "${MUSE_GATEWAY_PORT:-4571}:4571"
+    environment:
+      - MUSE_CLI_GATEWAY_HOST=0.0.0.0
+      - MUSE_CLI_GATEWAY_PORT=4571
+      - OPENCLAW_WORKSPACE=/workspace
+      - LOG_DIR=/logs
+    volumes:
+      - ${HOST_WORKSPACE_PATH:-./workspace}:/workspace
+      - ${HOST_LOGS_PATH:-./logs}:/logs
+      - ${HOST_MUSE_AUTH:-~/.config/muse/auth.json}:/root/.config/muse/auth.json:ro
+
+  log-viewer:
+    profiles: ["microservices"]
+    image: openclaw-cli-gateway-stack:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["log-viewer"]
+    restart: unless-stopped
+    ports:
+      - "${LOG_VIEWER_PORT:-8765}:8765"
+    environment:
+      - LOG_VIEWER_HOST=0.0.0.0
+      - LOG_VIEWER_PORT=8765
+      - LOG_DIR=/logs
+    volumes:
+      - ${HOST_LOGS_PATH:-./logs}:/logs
